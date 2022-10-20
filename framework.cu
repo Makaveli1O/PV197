@@ -16,7 +16,7 @@ struct sGalaxy {
 #include "kernel_CPU.C"
 
 // the size of the gallaxy can be arbitrary changed
-#define N 50000
+#define N 3
 
 void generateGalaxies(sGalaxy A, sGalaxy B, int n) {
 	for (int i = 0; i < n; i++) {
@@ -63,6 +63,7 @@ int main(int argc, char **argv){
 	cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, device);
     printf("Using device %d: \"%s\"\n", device, deviceProp.name);
+	//printf("%d \n",*deviceProp.maxGridSize);
 
 	// create events for timing
 	cudaEvent_t start, stop;
@@ -85,7 +86,7 @@ int main(int argc, char **argv){
 	|| cudaMalloc((void**)&dB.x, N*sizeof(dB.x[0])) != cudaSuccess
     || cudaMalloc((void**)&dB.y, N*sizeof(dB.y[0])) != cudaSuccess
     || cudaMalloc((void**)&dB.z, N*sizeof(dB.z[0])) != cudaSuccess) {
-		//fprintf(stderr, "Device memory allocation error!\n");
+		fprintf(stderr, "Device memory allocation error!\n");
 		cudaError_t err = cudaGetLastError();
 		if (err != cudaSuccess){
 			printf("CUDA ERROR while executing the kernel: %s\n",cudaGetErrorString(err));
