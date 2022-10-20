@@ -1,5 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
+#include <string.h>
 #include <cuda_runtime.h>
 
 // galaxy is stored as cartesian coordinates of its stars, each dimmension
@@ -35,6 +37,12 @@ void generateGalaxies(sGalaxy A, sGalaxy B, int n) {
             B.z[i] = A.z[i] + 1.0f * (float)rand() / (float)RAND_MAX;
 		}
 	}
+}
+
+void handleCudaError(cudaError_t cudaERR){
+  if (cudaERR!=cudaSuccess){
+    printf("CUDA ERROR : %s\n", cudaGetErrorString(cudaERR));
+  }
 }
 
 int main(int argc, char **argv){
@@ -77,7 +85,12 @@ int main(int argc, char **argv){
 	|| cudaMalloc((void**)&dB.x, N*sizeof(dB.x[0])) != cudaSuccess
     || cudaMalloc((void**)&dB.y, N*sizeof(dB.y[0])) != cudaSuccess
     || cudaMalloc((void**)&dB.z, N*sizeof(dB.z[0])) != cudaSuccess) {
-		fprintf(stderr, "Device memory allocation error!\n");
+		//fprintf(stderr, "Device memory allocation error!\n");
+		cudaError_t err = cudaGetLastError();
+		if (err != cudaSuccess){
+			printf("CUDA ERROR while executing the kernel: %s\n",cudaGetErrorString(err));
+			return 103;
+		}
 		goto cleanup;
 	}
 	cudaMemcpy(dA.x, A.x, N*sizeof(dA.x[0]), cudaMemcpyHostToDevice);
