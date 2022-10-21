@@ -11,10 +11,10 @@ float solveCPU(sGalaxy A, sGalaxy B, int n) {
 				+ (B.z[i]-B.z[j])*(B.z[i]-B.z[j]));
 			//XXX for large galaxies, more precise version of sum should be implemented, not required in this example 
 			tmp += (da-db) * (da-db);
-			printf("[%d][%d](%f-%f) * (%f-%f)\n", i,j,da,db,da,db);
+			//printf("[%d][%d](%f-%f) * (%f-%f) -- tmp = %f\n", i,j,da,db,da,db,tmp);
 		}
 		diff += tmp;
 	}
-			
+	//printf("total diff: %f \n",diff);
 	return sqrt(1/((float)n*((float)n-1)) * diff);
 }
