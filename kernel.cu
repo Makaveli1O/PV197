@@ -23,12 +23,7 @@ __global__ void increment_gpu(sGalaxy A, sGalaxy B, int n ,float* result){
         tmp = (da-db) * (da-db);
         atomicAdd(result, tmp);
 
-        printf("[%d][%d](%f-%f) * (%f-%f) -- tmp = %f -- result %f\n", i,j,da,db,da,db,tmp, *result);
-        if(i == n-2 && j == n-1){
-            float diff = *result;
-            *result = sqrt(1/((float)n*((float)n-1)) * diff);
-            printf("RESULT ::  : %f", *result);
-        }
+        //printf("[%d][%d](%f-%f) * (%f-%f) -- tmp = %f -- result %f\n", i,j,da,db,da,db,tmp, *result);
         return ;
     }
 }
@@ -50,6 +45,9 @@ float solveGPU(sGalaxy A, sGalaxy B, int n) {
 
     //copy data from GPU memory to CPU memory via PCIe bus
     cudaMemcpy(h_result, d_result, sizeof(float), cudaMemcpyDeviceToHost);
+
+    //use overall square root out of GPU, to avoid race condition
+    *h_result = sqrt(1/((float)n*((float)n-1)) * (* h_result));
 
     return *h_result;
 }

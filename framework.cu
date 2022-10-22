@@ -16,7 +16,7 @@ struct sGalaxy {
 #include "kernel_CPU.C"
 
 // the size of the gallaxy can be arbitrary changed
-#define N 50
+#define N 1000
 
 void generateGalaxies(sGalaxy A, sGalaxy B, int n) {
 	for (int i = 0; i < n; i++) {
@@ -60,6 +60,8 @@ int main(int argc, char **argv){
 		fprintf(stderr, "Cannot set CUDA device!\n");
 		exit(1);
 	}
+
+	printf("Number of stars per galaxy: %d\n", N);
 	cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, device);
     printf("Using device %d: \"%s\"\n", device, deviceProp.name);
@@ -116,7 +118,7 @@ int main(int argc, char **argv){
 	printf("Solving on GPU...\n");
 	cudaEventRecord(start, 0);
 	// run it 10x for more accurately timing results
-    for (int i = 0; i < 10; i++)
+    //FIXME for (int i = 0; i < 10; i++)
 		diff_GPU = solveGPU(dA, dB, N);
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);

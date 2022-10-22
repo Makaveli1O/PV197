@@ -15,6 +15,5 @@ float solveCPU(sGalaxy A, sGalaxy B, int n) {
 		}
 		diff += tmp;
 	}
-	//printf("total diff: %f \n",diff);
 	return sqrt(1/((float)n*((float)n-1)) * diff);
 }
