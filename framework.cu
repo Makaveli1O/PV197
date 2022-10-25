@@ -16,7 +16,7 @@ struct sGalaxy {
 #include "kernel_CPU.C"
 
 // the size of the gallaxy can be arbitrary changed
-#define N 1000
+#define N 20000
 
 void generateGalaxies(sGalaxy A, sGalaxy B, int n) {
 	for (int i = 0; i < n; i++) {

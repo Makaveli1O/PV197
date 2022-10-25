@@ -4,50 +4,71 @@
 Performs iteration paraller calculation no GPU
 */
 
-#define NUM_BLOCKS = 10
-#define NUM_THREADS = 256
+__global__ void reduce0(const sGalaxy A, const sGalaxy B, int n , float* output) {
+    extern __shared__ float sdata[];
 
-__global__ void increment_gpu(sGalaxy A, sGalaxy B, int n ,float* result){
-    //determine unique index within grid, miximizing block usage
-    int i = threadIdx.y + blockIdx.y * blockDim.y;
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n && j < n && j > i && i != j){
-        float tmp = 0.0f;
-        //printf("a.x[i->%d]: %f  a.x[j->%d]: %f\n", i,A.x[i], j, A.x[j]);
+    unsigned int tid = threadIdx.x;
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    for(int j = i+1; j < n; j++){
         float da = sqrt((A.x[i]-A.x[j])*(A.x[i]-A.x[j])
                     + (A.y[i]-A.y[j])*(A.y[i]-A.y[j])
                     + (A.z[i]-A.z[j])*(A.z[i]-A.z[j]));
         float db = sqrt((B.x[i]-B.x[j])*(B.x[i]-B.x[j])
                     + (B.y[i]-B.y[j])*(B.y[i]-B.y[j])
                     + (B.z[i]-B.z[j])*(B.z[i]-B.z[j]));
-        tmp = (da-db) * (da-db);
-        atomicAdd(result, tmp);
-
-        //printf("[%d][%d](%f-%f) * (%f-%f) -- tmp = %f -- result %f\n", i,j,da,db,da,db,tmp, *result);
-        return ;
+        sdata[tid] += (da-db) * (da-db);
     }
+
+    __syncthreads();
+
+    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
+        if (tid % (2 * s) == 0) {
+            sdata[tid] += sdata[tid + s];
+        }
+
+        __syncthreads();
+    }
+
+    if (tid == 0) output[blockIdx.x] = sdata[0];
 }
 
 
 float solveGPU(sGalaxy A, sGalaxy B, int n) {
-    float h_result[n];
-    float *d_result;
+    int numThreadsPerBlock = 1024;
 
-    //allocate space on GPU for d_result variable
-    cudaMalloc((void**)&d_result, sizeof(float));
+    float *hostOutput; 
+    float *deviceOutput; 
 
-    //define grid and block sizes
-    dim3 block_size(16,16);
-    dim3 grid_size((n+15)/16,  (n+15)/16);
+    int numInputElements = n;
+    int numOutputElements; // number of elements in the output list, initialised below
 
-    //Launch kernel with pass by referennce attribute and N size
-    increment_gpu <<<grid_size, block_size>>>(A, B, n,d_result);
+    numOutputElements = numInputElements / (numThreadsPerBlock / 2);
+    if (numInputElements % (numThreadsPerBlock / 2)) {
+        numOutputElements++;
+    }
 
-    //copy data from GPU memory to CPU memory via PCIe bus
-    cudaMemcpy(h_result, d_result, sizeof(float), cudaMemcpyDeviceToHost);
+    hostOutput = (float *)malloc(numOutputElements * sizeof(float));
 
+
+    const dim3 blockSize(numThreadsPerBlock, 1, 1);
+    const dim3 gridSize(numOutputElements, 1, 1);
+
+    cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float));
+
+
+    reduce0 <<<gridSize, blockSize, numThreadsPerBlock*sizeof(float) >>>(A, B, n, deviceOutput);
+
+    cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost);
+
+    for (int ii = 1; ii < numOutputElements; ii++) {
+        hostOutput[0] += hostOutput[ii]; //accumulates the sum in the first element
+    }
+    
     //use overall square root out of GPU, to avoid race condition
-    *h_result = sqrt(1/((float)n*((float)n-1)) * (* h_result));
+    float retval = sqrt(1/((float)n*((float)n-1)) * hostOutput[0]);
 
-    return *h_result;
+   
+
+    return retval;
 }
