@@ -1,3 +1,6 @@
+/*
+    Ensures safe cuda application executions
+*/
 #define gpuSafeExec(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
@@ -19,7 +22,12 @@ __device__ void flushShmem(float *shmem, int shmemSize){
     return;
 }
 
-__global__ void galaxy_similarity_reduce(const sGalaxy A, const sGalaxy B, int n , float* output, int shmemSize) {
+
+/*
+Solved by 1d array reduction described by NVIDIA docs.
+Might be improved with 2d array reduction?
+*/
+__global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, int n , float* output, int shmemSize) {
     extern __shared__ float sdata[];
 
     unsigned int tid = threadIdx.x;
@@ -42,7 +50,7 @@ __global__ void galaxy_similarity_reduce(const sGalaxy A, const sGalaxy B, int n
     //wait for shem flush
     __syncthreads();
     
-    
+    //do the math
     for(int j = i+1; j < n; j++){
         float da = sqrt((A.x[i]-A.x[j])*(A.x[i]-A.x[j])
                     + (A.y[i]-A.y[j])*(A.y[i]-A.y[j])
@@ -77,7 +85,9 @@ float solveGPU(sGalaxy A, sGalaxy B, int n) {
 
     //use cuda occupancy calculator to determine grid and block sizes
     gpuSafeExec(cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
-                                       galaxy_similarity_reduce, 0, 0)); 
+                                       galaxy_similarity_reduction, 0, 0)); 
+
+    //determine correct number of output elements after reduction
     int numOutputElements = n / (blockSize / 2);
     if (n % (blockSize / 2)) {
         numOutputElements++;
@@ -87,19 +97,22 @@ float solveGPU(sGalaxy A, sGalaxy B, int n) {
     // Round up according to array size 
     gridSize = (n + blockSize - 1) / blockSize; 
 
+    //allocate GPU memory
     gpuSafeExec(cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float)));
 
-    galaxy_similarity_reduce <<<gridSize, blockSize, blockSize*sizeof(float) >>>(A, B, n, deviceOutput, blockSize);
-
+    galaxy_similarity_reduction <<<gridSize, blockSize, blockSize*sizeof(float) >>>(A, B, n, deviceOutput, blockSize);
+    //move GPU results to CPU via PCIe
     gpuSafeExec(cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost));
 
-    for (int ii = 1; ii < numOutputElements; ii++) {
-        hostOutput[0] += hostOutput[ii]; //accumulates the sum in the first element
+    //accumulate the sum in the first element
+    for (int i = 1; i < numOutputElements; i++) {
+        hostOutput[0] += hostOutput[i]; 
     }
     
     //use overall square root out of GPU, to avoid race condition
     float retval = sqrt(1/((float)n*((float)n-1)) * hostOutput[0]);
 
+    //cleanup
     gpuSafeExec(cudaFree(deviceOutput));
     free(hostOutput);
 
