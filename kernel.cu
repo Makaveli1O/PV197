@@ -51,8 +51,18 @@ float solveGPU(sGalaxy A, sGalaxy B, int n) {
     hostOutput = (float *)malloc(numOutputElements * sizeof(float));
 
 
-    const dim3 blockSize(numThreadsPerBlock, 1, 1);
-    const dim3 gridSize(numOutputElements, 1, 1);
+    //const dim3 blockSize(numThreadsPerBlock, 1, 1);
+    //const dim3 gridSize(numOutputElements, 1, 1);
+
+    int blockSize;   // The launch configurator returned block size 
+    int minGridSize; // The minimum grid size needed to achieve the 
+                   // maximum occupancy for a full device launch 
+    int gridSize;    // The actual grid size needed, based on input size 
+
+    cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
+                                      reduce0, 0, 0); 
+    // Round up according to array size 
+    gridSize = (n + blockSize - 1) / blockSize; 
 
     cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float));
 
