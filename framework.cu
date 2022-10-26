@@ -16,7 +16,7 @@ struct sGalaxy {
 #include "kernel_CPU.C"
 
 // the size of the gallaxy can be arbitrary changed
-#define N 20000
+#define N 50000
 
 void generateGalaxies(sGalaxy A, sGalaxy B, int n) {
 	for (int i = 0; i < n; i++) {
@@ -120,7 +120,7 @@ int main(int argc, char **argv){
 	// run it 10x for more accurately timing results
     for (int i = 0; i < 10; i++){
 		diff_GPU = solveGPU(dA, dB, N);
-		//printf("result: %f\n",diff_GPU);
+
 	}
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);

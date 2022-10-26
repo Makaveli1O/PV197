@@ -8,11 +8,40 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
    }
 }
 
-__global__ void galaxy_similarity_reduce(const sGalaxy A, const sGalaxy B, int n , float* output) {
+/*
+    Clears shared memory which is not full of previous
+    numbers. Shmem is remembers values between consecutive
+    kernel calls.
+*/
+__device__ void flushShmem(float *shmem, int shmemSize){
+    for (int i = 0; i < shmemSize; i ++)
+        shmem[i] = 0.0f;
+    return;
+}
+
+__global__ void galaxy_similarity_reduce(const sGalaxy A, const sGalaxy B, int n , float* output, int shmemSize) {
     extern __shared__ float sdata[];
 
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    //clear SHMEM
+    if (tid == 0)
+    {
+        flushShmem(sdata, shmemSize);
+
+        for (int i = 0; i < shmemSize; i++)
+        {
+            if (sdata[i] != 0.0f)
+            {
+                printf("sdata[%d] = %f", i,sdata[i]);
+            }  
+        }
+    }
+
+    //wait for shem flush
+    __syncthreads();
+    
     
     for(int j = i+1; j < n; j++){
         float da = sqrt((A.x[i]-A.x[j])*(A.x[i]-A.x[j])
@@ -39,38 +68,28 @@ __global__ void galaxy_similarity_reduce(const sGalaxy A, const sGalaxy B, int n
 
 
 float solveGPU(sGalaxy A, sGalaxy B, int n) {
-    int numThreadsPerBlock = 1024;
-
     float *hostOutput; 
     float *deviceOutput; 
 
-    int numInputElements = n;
-    int numOutputElements; // number of elements in the output list, initialised below
+    int blockSize;
+    int minGridSize;
+    int gridSize;
 
-    numOutputElements = numInputElements / (numThreadsPerBlock / 2);
-    if (numInputElements % (numThreadsPerBlock / 2)) {
+    //use cuda occupancy calculator to determine grid and block sizes
+    gpuSafeExec(cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
+                                       galaxy_similarity_reduce, 0, 0)); 
+    int numOutputElements = n / (blockSize / 2);
+    if (n % (blockSize / 2)) {
         numOutputElements++;
     }
 
     hostOutput = (float *)malloc(numOutputElements * sizeof(float));
-
-
-    //const dim3 blockSize(numThreadsPerBlock, 1, 1);
-    //const dim3 gridSize(numOutputElements, 1, 1);
-
-    int blockSize;   // The launch configurator returned block size 
-    int minGridSize; // The minimum grid size needed to achieve the 
-                   // maximum occupancy for a full device launch 
-    int gridSize;    // The actual grid size needed, based on input size 
-
-    gpuSafeExec(cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
-                                       galaxy_similarity_reduce, 0, 0)); 
     // Round up according to array size 
     gridSize = (n + blockSize - 1) / blockSize; 
 
     gpuSafeExec(cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float)));
 
-    galaxy_similarity_reduce <<<gridSize, blockSize, numThreadsPerBlock*sizeof(float) >>>(A, B, n, deviceOutput);
+    galaxy_similarity_reduce <<<gridSize, blockSize, blockSize*sizeof(float) >>>(A, B, n, deviceOutput, blockSize);
 
     gpuSafeExec(cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost));
 
