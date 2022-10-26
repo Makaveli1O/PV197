@@ -81,7 +81,8 @@ float solveGPU(sGalaxy A, sGalaxy B, int n) {
     //use overall square root out of GPU, to avoid race condition
     float retval = sqrt(1/((float)n*((float)n-1)) * hostOutput[0]);
 
-   
+    gpuSafeExec(cudaFree(deviceOutput));
+    free(hostOutput);
 
     return retval;
 }
