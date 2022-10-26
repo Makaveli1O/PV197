@@ -1,10 +1,14 @@
-//TODO kernel implementation
+#define gpuSafeExec(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+   if (code != cudaSuccess) 
+   {
+      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+      if (abort) exit(code);
+   }
+}
 
-/*
-Performs iteration paraller calculation no GPU
-*/
-
-__global__ void reduce0(const sGalaxy A, const sGalaxy B, int n , float* output) {
+__global__ void galaxy_similarity_reduce(const sGalaxy A, const sGalaxy B, int n , float* output) {
     extern __shared__ float sdata[];
 
     unsigned int tid = threadIdx.x;
@@ -59,17 +63,16 @@ float solveGPU(sGalaxy A, sGalaxy B, int n) {
                    // maximum occupancy for a full device launch 
     int gridSize;    // The actual grid size needed, based on input size 
 
-    cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
-                                      reduce0, 0, 0); 
+    gpuSafeExec(cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
+                                       galaxy_similarity_reduce, 0, 0)); 
     // Round up according to array size 
     gridSize = (n + blockSize - 1) / blockSize; 
 
-    cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float));
+    gpuSafeExec(cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float)));
 
+    galaxy_similarity_reduce <<<gridSize, blockSize, numThreadsPerBlock*sizeof(float) >>>(A, B, n, deviceOutput);
 
-    reduce0 <<<gridSize, blockSize, numThreadsPerBlock*sizeof(float) >>>(A, B, n, deviceOutput);
-
-    cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost);
+    gpuSafeExec(cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost));
 
     for (int ii = 1; ii < numOutputElements; ii++) {
         hostOutput[0] += hostOutput[ii]; //accumulates the sum in the first element
