@@ -1,6 +1,8 @@
 **Similarity of two galaxies calculator**
 
-***Run configuration***
+barracuda ~ 40k Mpairs -- optimization required
+
+**Run configuration**
 
 make clean -- deletes bin files
 
