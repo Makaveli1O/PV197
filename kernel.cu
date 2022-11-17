@@ -1,3 +1,9 @@
+#include <iostream>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/transform_reduce.h>
+#include <thrust/functional.h>
+
 /*
     Ensures safe cuda application executions
 */
@@ -22,99 +28,82 @@ __device__ void flushShmem(float *shmem, int shmemSize){
     return;
 }
 
+struct MatrixIndex{
+    int i = 0;
+    int j = 0;
+};
 
-/*
-Solved by 1d array reduction described by NVIDIA docs.
-Might be improved with 2d array reduction?
-*/
-__global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, int n , float* output, int shmemSize) {
-    extern __shared__ float sdata[];
-
-    unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-    //clear SHMEM
-    if (tid == 0)
-    {
-        flushShmem(sdata, shmemSize);
-
-        for (int i = 0; i < shmemSize; i++)
-        {
-            if (sdata[i] != 0.0f)
-            {
-                printf("sdata[%d] = %f", i,sdata[i]);
-            }  
-        }
-    }
-
-    //wait for shem flush
-    __syncthreads();
-    
-    //do the math
-    for(int j = i+1; j < n; j++){
-        float da = sqrt((A.x[i]-A.x[j])*(A.x[i]-A.x[j])
-                    + (A.y[i]-A.y[j])*(A.y[i]-A.y[j])
-                    + (A.z[i]-A.z[j])*(A.z[i]-A.z[j]));
-        float db = sqrt((B.x[i]-B.x[j])*(B.x[i]-B.x[j])
-                    + (B.y[i]-B.y[j])*(B.y[i]-B.y[j])
-                    + (B.z[i]-B.z[j])*(B.z[i]-B.z[j]));
-        sdata[tid] += (da-db) * (da-db);
-    }
-
-    __syncthreads();
-
-    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
-        if (tid % (2 * s) == 0) {
-            sdata[tid] += sdata[tid + s];
-        }
-
-        __syncthreads();
-    }
-
-    if (tid == 0) output[blockIdx.x] = sdata[0];
+std::ostream& operator<<(std::ostream& os, const MatrixIndex& m){
+    os << "(" << m.i << "," << m.j << ")";
+    return os;
 }
 
+struct ConvertLinearIndexToTriangularMatrixIndex{
+    int dim;
+
+    __host__ __device__
+    ConvertLinearIndexToTriangularMatrixIndex(int dimension) : dim(dimension){}
+
+    __host__ __device__
+    MatrixIndex operator()(int linear) const {
+        MatrixIndex result;
+       //check if those indices work for you
+
+        //compute i and j from linear index https://stackoverflow.com/questions/27086195/linear-index-upper-triangular-matrix
+        result.i = dim - 2 - floor(sqrt(-8*linear + 4*dim*(dim-1)-7)/2.0 - 0.5);
+        result.j = linear + result.i + 1 - dim*(dim-1)/2 + (dim-result.i)*((dim-result.i)-1)/2;
+
+        return result;
+    }
+};
+
+struct ComputeDelta{
+    sGalaxy A;
+    sGalaxy B;
+
+    __host__ __device__
+    ComputeDelta(sGalaxy _A, sGalaxy _B){
+        /* init A and B*/
+        A = _A;
+        B = _B;
+    }
+
+    __host__ __device__
+    float operator()(const MatrixIndex& index) const{
+        
+        float da = 0;
+        float db = 0;
+
+        da = sqrt((A.x[index.i]-A.x[index.j])*(A.x[index.i]-A.x[index.j])
+                    + (A.y[index.i]-A.y[index.j])*(A.y[index.i]-A.y[index.j])
+                    + (A.z[index.i]-A.z[index.j])*(A.z[index.i]-A.z[index.j]));
+        db = sqrt((B.x[index.i]-B.x[index.j])*(B.x[index.i]-B.x[index.j])
+                    + (B.y[index.i]-B.y[index.j])*(B.y[index.i]-B.y[index.j])
+                    + (B.z[index.i]-B.z[index.j])*(B.z[index.i]-B.z[index.j]));
+
+        return (da-db) * (da-db);
+    }
+};
 
 float solveGPU(sGalaxy A, sGalaxy B, int n) {
-    float *hostOutput; 
-    float *deviceOutput; 
+    const int dim = n;
+    const int elems = round(n*(n-1)/2); //upper triangular(without diagonal) number of elements formula
+    auto matrixIndexIterator = thrust::make_transform_iterator(
+        thrust::make_counting_iterator(0),
+        ConvertLinearIndexToTriangularMatrixIndex{dim}
+    );
 
-    int blockSize;
-    int minGridSize;
-    int gridSize;
 
-    //use cuda occupancy calculator to determine grid and block sizes
-    gpuSafeExec(cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
-                                       galaxy_similarity_reduction, 0, 0)); 
-
-    //determine correct number of output elements after reduction
-    int numOutputElements = n / (blockSize / 2);
-    if (n % (blockSize / 2)) {
-        numOutputElements++;
-    }
-
-    hostOutput = (float *)malloc(numOutputElements * sizeof(float));
-    // Round up according to array size 
-    gridSize = (n + blockSize - 1) / blockSize; 
-
-    //allocate GPU memory
-    gpuSafeExec(cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float)));
-
-    galaxy_similarity_reduction <<<gridSize, blockSize, blockSize*sizeof(float) >>>(A, B, n, deviceOutput, blockSize);
-    //move GPU results to CPU via PCIe
-    gpuSafeExec(cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost));
-
-    //accumulate the sum in the first element
-    for (int i = 1; i < numOutputElements; i++) {
-        hostOutput[0] += hostOutput[i]; 
-    }
+    //for(int i = 0; i < elems; i++){
+    //    std::cout << matrixIndexIterator[i] << " ";
+    //}
     
-    //use overall square root out of GPU, to avoid race condition
-    float retval = sqrt(1/((float)n*((float)n-1)) * hostOutput[0]);
-
-    //cleanup
-    gpuSafeExec(cudaFree(deviceOutput));
-    free(hostOutput);
-
-    return retval;
+    float result = thrust::transform_reduce(
+        matrixIndexIterator, 
+        matrixIndexIterator + elems, 
+        ComputeDelta{A,B}, 
+        float(0), 
+        thrust::plus<float>{}
+    );
+    return sqrt(1/((float)n*((float)n-1)) * result);
 }

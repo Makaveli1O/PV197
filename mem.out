@@ -1,0 +1,22 @@
+Number of stars per galaxy: 20000
+Using device 0: "NVIDIA GeForce RTX 3060 Laptop GPU"
+Solving on CPU...
+CPU performance: 390.442291 megapairs/s
+Solving on GPU...
+result: 0.614017
+result: 1.577693
+result: 3.144744
+result: 5.513670
+result: 8.913542
+result: 13.608475
+result: 19.900740
+result: 28.133677
+result: 38.694576
+result: 52.017567
+GPU performance: 53750.164062 megapairs/s
+CPU diff: 0.614017
+GPU diff: 52.017567
+========= CUDA-MEMCHECK
+========= This tool is deprecated and will be removed in a future release of the CUDA toolkit
+========= Please use the compute-sanitizer tool as a drop-in replacement
+========= ERROR SUMMARY: 0 errors
