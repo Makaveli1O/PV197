@@ -32,23 +32,17 @@ struct sPoint{
 Solved by 1d array reduction described by NVIDIA docs.
 Might be improved with 2d array reduction?
 */
-const int blocksize = 4;
+const int blocksize = 256;
 __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, const int n , float* output) {
     __shared__ float sdata[blocksize];
     __shared__ sPoint As[blocksize];
     __shared__ sPoint Bs[blocksize];
-    __shared__ sPoint Asj[blocksize];
-    __shared__ sPoint Bsj[blocksize];
 
     unsigned int tx_g = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int tx = threadIdx.x;
-
-    As[tx].x = A.x[tx_g];
-    As[tx].y = A.y[tx_g];
-    As[tx].z = A.z[tx_g];
-    Bs[tx].x = B.x[tx_g];
-    Bs[tx].y = B.y[tx_g];
-    Bs[tx].z = B.z[tx_g];
+    unsigned int ty = threadIdx.y;
+    unsigned int bx = blockIdx.x;
+    unsigned int by = blockIdx.y;
 
     //clear SHMEM
     if (tx == 0)
@@ -61,26 +55,23 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, co
 
     for (int tile = 0; tile < n / blocksize; tile++)
     {
-        for (int j = 0; j < blocksize; j++)
-        {
-            Asj[j].x = A.x[j + (blocksize * tile)];
-            Asj[j].y = A.y[j + (blocksize * tile)];
-            Asj[j].z = A.z[j + (blocksize * tile)];
-            Bsj[j].x = B.x[j + (blocksize * tile)];
-            Bsj[j].y = B.y[j + (blocksize * tile)];
-            Bsj[j].z = B.z[j + (blocksize * tile)];
-        }
+        As[tx].x = A.x[(ty + by * blocksize)*n + tile*blocksize+tx];
+        As[tx].y = A.y[(ty + by * blocksize)*n + tile*blocksize+tx];
+        As[tx].z = A.z[(ty + by * blocksize)*n + tile*blocksize+tx];
+        Bs[tx].x = B.x[(ty + by * blocksize)*n + tile*blocksize+tx];
+        Bs[tx].y = B.y[(ty + by * blocksize)*n + tile*blocksize+tx];
+        Bs[tx].z = B.z[(ty + by * blocksize)*n + tile*blocksize+tx];
+
         __syncthreads();
         for (int j = 0; j < blocksize; j++){
-            
             int idx = j + (blocksize * tile); //global index   
             if (idx < tx_g || idx == tx_g){continue;}
-            float da = sqrt((As[tx].x-Asj[j].x)*(As[tx].x-Asj[j].x)
-                        + (As[tx].y-Asj[j].y)*(As[tx].y-Asj[j].y)
-                        + (As[tx].z-Asj[j].z)*(As[tx].z-Asj[j].z));
-            float db = sqrt((Bs[tx].x-Bsj[j].x)*(Bs[tx].x-Bsj[j].x)
-                        + (Bs[tx].y-Bsj[j].y)*(Bs[tx].y-Bsj[j].y)
-                        + (Bs[tx].z-Bsj[j].z)*(Bs[tx].z-Bsj[j].z));            
+            float da = sqrt((As[tx].x-As[j].x)*(As[tx].x-As[j].x)
+                        + (As[tx].y-As[j].y)*(As[tx].y-As[j].y)
+                        + (As[tx].z-As[j].z)*(As[tx].z-As[j].z));
+            float db = sqrt((Bs[tx].x-Bs[j].x)*(Bs[tx].x-Bs[j].x)
+                        + (Bs[tx].y-Bs[j].y)*(Bs[tx].y-Bs[j].y)
+                        + (Bs[tx].z-Bs[j].z)*(Bs[tx].z-Bs[j].z));            
             sdata[tx] += (da-db) * (da-db);
         }
         __syncthreads();
