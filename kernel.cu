@@ -60,49 +60,45 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, in
     //wait for shem flush
     __syncthreads();
 
-    for (int tile = blockIdx.x; tile < n / blocksize; tile++)
+    for (int tile = 0; tile < n / blocksize; tile++)
     {
+
         for (int j = 0; j < blocksize; j++)
         {
-            Asj[tx].x = A.x[j + (blocksize * tile)];
-            Asj[tx].y = A.y[j + (blocksize * tile)];
-            Asj[tx].z = A.z[j + (blocksize * tile)];
-            Bsj[tx].x = B.x[j + (blocksize * tile)];
-            Bsj[tx].y = B.y[j + (blocksize * tile)];
-            Bsj[tx].z = B.z[j + (blocksize * tile)];
+            //printf("Asj[%d].x = A.x[%d =>%d + (%d * %d)]\n ",j, j + (blocksize * tile), j , blocksize, tile);
+            Asj[j].x = A.x[j + (blocksize * tile)];
+            Asj[j].y = A.y[j + (blocksize * tile)];
+            Asj[j].z = A.z[j + (blocksize * tile)];
+            Bsj[j].x = B.x[j + (blocksize * tile)];
+            Bsj[j].y = B.y[j + (blocksize * tile)];
+            Bsj[j].z = B.z[j + (blocksize * tile)];
             
         }
         __syncthreads();
-
-            for (int j = 0; j < blocksize; j++){
-                int idx = j + (blocksize * tile);
-                if (idx > blocksize)
-                {
-                    printf("Loading required!\n");
-                    //Bsj[tx].x = B.x[j + (blocksize * tile)];
-                    //Bsj[tx].y = B.y[j + (blocksize * tile)];
-                    //Bsj[tx].z = B.z[j + (blocksize * tile)];
-                }
-                
-                if (idx < tx_g || idx == tx_g) continue;
-                printf("idx: %d , j:%d \n", idx, j);
-                
-                float da = sqrt((As[tx].x-A.x[idx])*(As[tx].x-A.x[idx])
-                            + (As[tx].y-A.y[idx])*(As[tx].y-A.y[idx])
-                            + (As[tx].z-A.z[idx])*(As[tx].z-A.z[idx]));
-                float db = sqrt((Bs[tx].x-B.x[idx])*(Bs[tx].x-B.x[idx])
-                            + (Bs[tx].y-B.y[idx])*(Bs[tx].y-B.y[idx])
-                            + (Bs[tx].z-B.z[idx])*(Bs[tx].z-B.z[idx]));
-                /*
-                float da = sqrt((As[tx].x-As[j].x)*(As[tx].x-As[j].x)
-                            + (As[tx].y-As[j].y)*(As[tx].y-As[j].y)
-                            + (As[tx].z-As[j].z)*(As[tx].z-As[j].z));
-                float db = sqrt((Bs[tx].x-Bs[j].x)*(Bs[tx].x-Bs[j].x)
-                            + (Bs[tx].y-Bs[j].y)*(Bs[tx].y-Bs[j].y)
-                            + (Bs[tx].z-Bs[j].z)*(Bs[tx].z-Bs[j].z));
-                */
-                sdata[tx] += (da-db) * (da-db);
-            }
+        for (int j = 0; j < blocksize; j++){
+            
+            int idx = j + (blocksize * tile); //global index   
+            if (idx < tx_g || idx == tx_g) continue;
+            
+            /*
+            float da = sqrt((As[tx].x-A.x[idx])*(As[tx].x-A.x[idx])
+                        + (As[tx].y-A.y[idx])*(As[tx].y-A.y[idx])
+                        + (As[tx].z-A.z[idx])*(As[tx].z-A.z[idx]));
+            float db = sqrt((Bs[tx].x-B.x[idx])*(Bs[tx].x-B.x[idx])
+                        + (Bs[tx].y-B.y[idx])*(Bs[tx].y-B.y[idx])
+                        + (Bs[tx].z-B.z[idx])*(Bs[tx].z-B.z[idx]));
+            */
+            printf("A.x[%d] -> %f Asj[%d].x -> %f  \n", idx, A.x[idx], j, Asj[j].x);
+            
+            float da = sqrt((As[tx].x-Asj[j].x)*(As[tx].x-Asj[j].x)
+                        + (As[tx].y-Asj[j].y)*(As[tx].y-Asj[j].y)
+                        + (As[tx].z-Asj[j].z)*(As[tx].z-Asj[j].z));
+            float db = sqrt((Bs[tx].x-Bsj[j].x)*(Bsj[tx].x-Bsj[j].x)
+                        + (Bs[tx].y-Bsj[j].y)*(Bsj[tx].y-Bsj[j].y)
+                        + (Bs[tx].z-Bsj[j].z)*(Bsj[tx].z-Bsj[j].z));
+            
+            sdata[tx] += (da-db) * (da-db);
+        }
         __syncthreads();
     }
     
