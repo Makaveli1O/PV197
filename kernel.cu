@@ -33,14 +33,13 @@ Solved by 1d array reduction described by NVIDIA docs.
 Might be improved with 2d array reduction?
 */
 const int blocksize = 4;
-__global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, int n , float* output) {
+__global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, const int n , float* output) {
     __shared__ float sdata[blocksize];
     __shared__ sPoint As[blocksize];
     __shared__ sPoint Bs[blocksize];
     __shared__ sPoint Asj[blocksize];
     __shared__ sPoint Bsj[blocksize];
 
-    unsigned int tid = threadIdx.x;
     unsigned int tx_g = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int tx = threadIdx.x;
 
@@ -52,7 +51,7 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, in
     Bs[tx].z = B.z[tx_g];
 
     //clear SHMEM
-    if (tid == 0)
+    if (tx == 0)
     {
         flushShmem(sdata, blocksize);
     }
@@ -62,72 +61,43 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, in
 
     for (int tile = 0; tile < n / blocksize; tile++)
     {
-
         for (int j = 0; j < blocksize; j++)
         {
-            //printf("Asj[%d].x = A.x[%d =>%d + (%d * %d)]\n ",j, j + (blocksize * tile), j , blocksize, tile);
             Asj[j].x = A.x[j + (blocksize * tile)];
             Asj[j].y = A.y[j + (blocksize * tile)];
             Asj[j].z = A.z[j + (blocksize * tile)];
             Bsj[j].x = B.x[j + (blocksize * tile)];
             Bsj[j].y = B.y[j + (blocksize * tile)];
             Bsj[j].z = B.z[j + (blocksize * tile)];
-            
         }
         __syncthreads();
         for (int j = 0; j < blocksize; j++){
             
             int idx = j + (blocksize * tile); //global index   
-            if (idx < tx_g || idx == tx_g) continue;
-            
-            /*
-            float da = sqrt((As[tx].x-A.x[idx])*(As[tx].x-A.x[idx])
-                        + (As[tx].y-A.y[idx])*(As[tx].y-A.y[idx])
-                        + (As[tx].z-A.z[idx])*(As[tx].z-A.z[idx]));
-            float db = sqrt((Bs[tx].x-B.x[idx])*(Bs[tx].x-B.x[idx])
-                        + (Bs[tx].y-B.y[idx])*(Bs[tx].y-B.y[idx])
-                        + (Bs[tx].z-B.z[idx])*(Bs[tx].z-B.z[idx]));
-            */
-            printf("A.x[%d] -> %f Asj[%d].x -> %f  \n", idx, A.x[idx], j, Asj[j].x);
-            
+            if (idx < tx_g || idx == tx_g){continue;}
             float da = sqrt((As[tx].x-Asj[j].x)*(As[tx].x-Asj[j].x)
                         + (As[tx].y-Asj[j].y)*(As[tx].y-Asj[j].y)
                         + (As[tx].z-Asj[j].z)*(As[tx].z-Asj[j].z));
-            float db = sqrt((Bs[tx].x-Bsj[j].x)*(Bsj[tx].x-Bsj[j].x)
-                        + (Bs[tx].y-Bsj[j].y)*(Bsj[tx].y-Bsj[j].y)
-                        + (Bs[tx].z-Bsj[j].z)*(Bsj[tx].z-Bsj[j].z));
-            
+            float db = sqrt((Bs[tx].x-Bsj[j].x)*(Bs[tx].x-Bsj[j].x)
+                        + (Bs[tx].y-Bsj[j].y)*(Bs[tx].y-Bsj[j].y)
+                        + (Bs[tx].z-Bsj[j].z)*(Bs[tx].z-Bsj[j].z));            
             sdata[tx] += (da-db) * (da-db);
         }
         __syncthreads();
     }
     
-
-    
-    
-    //do the math
-
-    for(int j = tx_g + 1; j < n; j++){
-        //printf("j: %d\n",j);
-        //float da = sqrt((As[tx].x-A.x[j])*(As[tx].x-A.x[j])
-        //            + (As[tx].y-A.y[j])*(As[tx].y-A.y[j])
-        //            + (As[tx].z-A.z[j])*(As[tx].z-A.z[j]));
-        //float db = sqrt((Bs[tx].x-B.x[j])*(Bs[tx].x-B.x[j])
-        //            + (Bs[tx].y-B.y[j])*(Bs[tx].y-B.y[j])
-        //            + (Bs[tx].z-B.z[j])*(Bs[tx].z-B.z[j]));
-        //sdata[tid] += (da-db) * (da-db);
-    }
-    
-
-    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
-        if (tid % (2 * s) == 0) {
-            sdata[tid] += sdata[tid + s];
+    for (unsigned int stride = blockDim.x/2; stride > 0; stride>>=1)
+    {
+        if (tx < stride)
+        {
+            sdata[tx] += sdata[tx + stride];
         }
-
+        
         __syncthreads();
     }
+    
 
-    if (tid == 0) output[blockIdx.x] = sdata[0];
+    if (tx == 0) output[blockIdx.x] = sdata[0];
 }
 
 

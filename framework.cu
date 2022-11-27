@@ -155,9 +155,9 @@ int main(int argc, char **argv){
 	printf("Solving on GPU with default kernel...\n");
 	cudaEventRecord(start, 0);
 	// run it 10x for more accurately timing results
-    //for (int i = 0; i < 10; i++){
+    for (int i = 0; i < 10; i++){
 		diff_GPU = solveGPU(dA, dB, N);
-	//}
+	}
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&time, start, stop);
