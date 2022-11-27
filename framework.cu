@@ -13,10 +13,12 @@ struct sGalaxy {
 };
 
 #include "kernel.cu"
-#include "kernel_CPU.C"
+#include "kernel_CPU.c"
+#include "kernel_CPU2.c"
 
 // the size of the gallaxy can be arbitrary changed
-#define N 50000
+#define N 8
+
 
 void generateGalaxies(sGalaxy A, sGalaxy B, int n) {
 	for (int i = 0; i < n; i++) {
@@ -39,6 +41,35 @@ void generateGalaxies(sGalaxy A, sGalaxy B, int n) {
 	}
 }
 
+void generateSimilarGalaxies(sGalaxy A, sGalaxy B, int n) {
+	for (int i = 0; i < n; i++) {
+		// create star in A at random position first
+		A.x[i] = 1000.0f * (float)rand() / (float)RAND_MAX;
+		A.y[i] = 1000.0f * (float)rand() / (float)RAND_MAX;
+		A.z[i] = 1000.0f * (float)rand() / (float)RAND_MAX;
+		B.x[i] = A.x[i];
+		B.y[i] = A.y[i];
+		B.z[i] = A.z[i];
+		if (i == n - 1) break;
+		
+		//printf("B.x[%d] = %f\n",i,A.x[i]);
+	}
+	A.x[n-1] += 100000.0f;
+	//printf("B.x[%d] = %f\n",n-1,A.x[n-1]);
+}
+
+void populateByOne(sGalaxy A, sGalaxy B, int n) {
+	for (int i = 0; i < n; i++) {
+		// create star in A at random position first
+		A.x[i] = 1.0f;
+		A.y[i] = 1.0f;
+		A.z[i] = 1.0f;
+		B.x[i] = 1.0f;
+		B.y[i] = 1.0f;
+		B.z[i] = 1.0f;
+	}
+}
+
 void handleCudaError(cudaError_t cudaERR){
   if (cudaERR!=cudaSuccess){
     printf("CUDA ERROR : %s\n", cudaGetErrorString(cudaERR));
@@ -46,11 +77,12 @@ void handleCudaError(cudaError_t cudaERR){
 }
 
 int main(int argc, char **argv){
+
 	sGalaxy A, B;
 	A.x = A.y = A.z = B.x = B.y = B.z = NULL;
 	sGalaxy dA, dB;
 	dA.x = dA.y = dA.z = dB.x = dB.y = dB.z = NULL;
-	float diff_CPU, diff_GPU;
+	float diff_CPU, diff_GPU, diff_CPU2;
 
 	// parse command line
 	int device = 0;
@@ -61,7 +93,7 @@ int main(int argc, char **argv){
 		exit(1);
 	}
 
-	printf("Number of stars per galaxy: %d\n", N);
+	printf("Number of points per cluster: %d\n", N);
 	cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, device);
     printf("Using device %d: \"%s\"\n", device, deviceProp.name);
@@ -79,8 +111,9 @@ int main(int argc, char **argv){
 	B.x = (float*)malloc(N*sizeof(B.x[0]));
     B.y = (float*)malloc(N*sizeof(B.y[0]));
     B.z = (float*)malloc(N*sizeof(B.z[0]));
-	generateGalaxies(A, B, N);      
- 
+	generateGalaxies(A, B, N);  
+	//generateSimilarGalaxies(A,B,N);    
+	//populateByOne(A,B,N);
 	// allocate and set device memory
 	if (cudaMalloc((void**)&dA.x, N*sizeof(dA.x[0])) != cudaSuccess
 	|| cudaMalloc((void**)&dA.y, N*sizeof(dA.y[0])) != cudaSuccess
@@ -107,6 +140,9 @@ int main(int argc, char **argv){
     printf("Solving on CPU...\n");
 	cudaEventRecord(start, 0);
 	diff_CPU = solveCPU(A, B, N);
+	diff_CPU2 = solveCPU2(A,B,N,4);
+	printf("%f = %f",diff_CPU, diff_CPU2);
+	//assert(diff_CPU2 == diff_CPU);
 	cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     float time;
@@ -115,13 +151,13 @@ int main(int argc, char **argv){
         float(N)*float(N-1)/2.0f/time/1e3f);
 
 	// solve on GPU
-	printf("Solving on GPU...\n");
+   
+	printf("Solving on GPU with default kernel...\n");
 	cudaEventRecord(start, 0);
 	// run it 10x for more accurately timing results
-    for (int i = 0; i < 10; i++){
+    //for (int i = 0; i < 10; i++){
 		diff_GPU = solveGPU(dA, dB, N);
-
-	}
+	//}
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&time, start, stop);
@@ -135,6 +171,29 @@ int main(int argc, char **argv){
 	else
 		 fprintf(stderr, "Data mismatch: %f should be %f :-(\n", diff_GPU, diff_CPU);
 
+    
+	#if 0
+    // solve on GPU with cub block reduce
+	printf("Solving on GPU with cub block reduce kernel...\n");
+	cudaEventRecord(start, 0);
+	// run it 10x for more accurately timing results
+    for (int i = 0; i < 10; i++){
+		diff_GPU = solveGPU_cubblockreduce(dA, dB, N);
+
+	}
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&time, start, stop);
+	printf("GPU performance with cub blockreduce: %f megapairs/s\n",
+        float(N)*float(N-1)/2.0f/time/1e2f);
+
+	printf("CPU diff: %f\nGPU diff: %f\n", diff_CPU, diff_GPU);
+	// check GPU results
+	if ( fabsf((diff_CPU-diff_GPU) / ((diff_CPU+diff_GPU)/2.0f)) < 0.01f)
+		printf("Test OK :-).\n");
+	else
+		 fprintf(stderr, "Data mismatch: %f should be %f :-(\n", diff_GPU, diff_CPU);
+	#endif
 cleanup:
 	cudaEventDestroy(start);
     cudaEventDestroy(stop);
@@ -154,4 +213,3 @@ cleanup:
 
 	return 0;
 }
-

@@ -22,46 +22,106 @@ __device__ void flushShmem(float *shmem, int shmemSize){
     return;
 }
 
+struct sPoint{
+    float x;
+    float y;
+    float z;
+};
 
 /*
 Solved by 1d array reduction described by NVIDIA docs.
 Might be improved with 2d array reduction?
 */
-__global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, int n , float* output, int shmemSize) {
-    extern __shared__ float sdata[];
+const int blocksize = 4;
+__global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, int n , float* output) {
+    __shared__ float sdata[blocksize];
+    __shared__ sPoint As[blocksize];
+    __shared__ sPoint Bs[blocksize];
+    __shared__ sPoint Asj[blocksize];
+    __shared__ sPoint Bsj[blocksize];
 
     unsigned int tid = threadIdx.x;
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int tx_g = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int tx = threadIdx.x;
+
+    As[tx].x = A.x[tx_g];
+    As[tx].y = A.y[tx_g];
+    As[tx].z = A.z[tx_g];
+    Bs[tx].x = B.x[tx_g];
+    Bs[tx].y = B.y[tx_g];
+    Bs[tx].z = B.z[tx_g];
 
     //clear SHMEM
     if (tid == 0)
     {
-        flushShmem(sdata, shmemSize);
-
-        for (int i = 0; i < shmemSize; i++)
-        {
-            if (sdata[i] != 0.0f)
-            {
-                printf("sdata[%d] = %f", i,sdata[i]);
-            }  
-        }
+        flushShmem(sdata, blocksize);
     }
 
     //wait for shem flush
     __syncthreads();
+
+    for (int tile = blockIdx.x; tile < n / blocksize; tile++)
+    {
+        for (int j = 0; j < blocksize; j++)
+        {
+            Asj[tx].x = A.x[j + (blocksize * tile)];
+            Asj[tx].y = A.y[j + (blocksize * tile)];
+            Asj[tx].z = A.z[j + (blocksize * tile)];
+            Bsj[tx].x = B.x[j + (blocksize * tile)];
+            Bsj[tx].y = B.y[j + (blocksize * tile)];
+            Bsj[tx].z = B.z[j + (blocksize * tile)];
+            
+        }
+        __syncthreads();
+
+            for (int j = 0; j < blocksize; j++){
+                int idx = j + (blocksize * tile);
+                if (idx > blocksize)
+                {
+                    printf("Loading required!\n");
+                    //Bsj[tx].x = B.x[j + (blocksize * tile)];
+                    //Bsj[tx].y = B.y[j + (blocksize * tile)];
+                    //Bsj[tx].z = B.z[j + (blocksize * tile)];
+                }
+                
+                if (idx < tx_g || idx == tx_g) continue;
+                printf("idx: %d , j:%d \n", idx, j);
+                
+                float da = sqrt((As[tx].x-A.x[idx])*(As[tx].x-A.x[idx])
+                            + (As[tx].y-A.y[idx])*(As[tx].y-A.y[idx])
+                            + (As[tx].z-A.z[idx])*(As[tx].z-A.z[idx]));
+                float db = sqrt((Bs[tx].x-B.x[idx])*(Bs[tx].x-B.x[idx])
+                            + (Bs[tx].y-B.y[idx])*(Bs[tx].y-B.y[idx])
+                            + (Bs[tx].z-B.z[idx])*(Bs[tx].z-B.z[idx]));
+                /*
+                float da = sqrt((As[tx].x-As[j].x)*(As[tx].x-As[j].x)
+                            + (As[tx].y-As[j].y)*(As[tx].y-As[j].y)
+                            + (As[tx].z-As[j].z)*(As[tx].z-As[j].z));
+                float db = sqrt((Bs[tx].x-Bs[j].x)*(Bs[tx].x-Bs[j].x)
+                            + (Bs[tx].y-Bs[j].y)*(Bs[tx].y-Bs[j].y)
+                            + (Bs[tx].z-Bs[j].z)*(Bs[tx].z-Bs[j].z));
+                */
+                sdata[tx] += (da-db) * (da-db);
+            }
+        __syncthreads();
+    }
+    
+
+    
     
     //do the math
-    for(int j = i+1; j < n; j++){
-        float da = sqrt((A.x[i]-A.x[j])*(A.x[i]-A.x[j])
-                    + (A.y[i]-A.y[j])*(A.y[i]-A.y[j])
-                    + (A.z[i]-A.z[j])*(A.z[i]-A.z[j]));
-        float db = sqrt((B.x[i]-B.x[j])*(B.x[i]-B.x[j])
-                    + (B.y[i]-B.y[j])*(B.y[i]-B.y[j])
-                    + (B.z[i]-B.z[j])*(B.z[i]-B.z[j]));
-        sdata[tid] += (da-db) * (da-db);
-    }
 
-    __syncthreads();
+    for(int j = tx_g + 1; j < n; j++){
+        //printf("j: %d\n",j);
+        //float da = sqrt((As[tx].x-A.x[j])*(As[tx].x-A.x[j])
+        //            + (As[tx].y-A.y[j])*(As[tx].y-A.y[j])
+        //            + (As[tx].z-A.z[j])*(As[tx].z-A.z[j]));
+        //float db = sqrt((Bs[tx].x-B.x[j])*(Bs[tx].x-B.x[j])
+        //            + (Bs[tx].y-B.y[j])*(Bs[tx].y-B.y[j])
+        //            + (Bs[tx].z-B.z[j])*(Bs[tx].z-B.z[j]));
+        //sdata[tid] += (da-db) * (da-db);
+    }
+    
 
     for (unsigned int s = 1; s < blockDim.x; s *= 2) {
         if (tid % (2 * s) == 0) {
@@ -79,28 +139,20 @@ float solveGPU(sGalaxy A, sGalaxy B, int n) {
     float *hostOutput; 
     float *deviceOutput; 
 
-    int blockSize;
-    int minGridSize;
-    int gridSize;
-
-    //use cuda occupancy calculator to determine grid and block sizes
-    gpuSafeExec(cudaOccupancyMaxPotentialBlockSize( &minGridSize, &blockSize, 
-                                       galaxy_similarity_reduction, 0, 0)); 
-
     //determine correct number of output elements after reduction
-    int numOutputElements = n / (blockSize / 2);
-    if (n % (blockSize / 2)) {
+    int numOutputElements = n / (blocksize / 2);
+    if (n % (blocksize / 2)) {
         numOutputElements++;
     }
 
     hostOutput = (float *)malloc(numOutputElements * sizeof(float));
     // Round up according to array size 
-    gridSize = (n + blockSize - 1) / blockSize; 
-
+    int gridSize = (n + blocksize - 1) / blocksize; 
+    //printf("blocksize : %d gridSize: %d\n", blocksize, gridSize);
     //allocate GPU memory
     gpuSafeExec(cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float)));
-
-    galaxy_similarity_reduction <<<gridSize, blockSize, blockSize*sizeof(float) >>>(A, B, n, deviceOutput, blockSize);
+    //std::cerr << "galaxy_similarity_reduction<<<" << gridSize << "," << blocksize << "," << 0 << ">>>\n";
+    galaxy_similarity_reduction<<<gridSize, blocksize>>>(A, B, n, deviceOutput);
     //move GPU results to CPU via PCIe
     gpuSafeExec(cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost));
 

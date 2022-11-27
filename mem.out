@@ -1,0 +1,28 @@
+Number of points per cluster: 20000
+Using device 0: "NVIDIA GeForce RTX 3060 Laptop GPU"
+Solving on CPU...
+CPU performance: 356.143188 megapairs/s
+Solving on GPU with default kernel...
+Hello 
+Hello 
+Hello 
+Hello 
+Hello 
+Hello 
+Hello 
+Hello 
+Hello 
+Hello 
+GPU performance: 42863.414062 megapairs/s
+CPU diff: 0.614017
+GPU diff: 0.614017
+Test OK :-).
+Solving on GPU with cub block reduce kernel...
+GPU performance with cub blockreduce: 56104.300781 megapairs/s
+CPU diff: 0.614017
+GPU diff: 0.614017
+Test OK :-).
+========= CUDA-MEMCHECK
+========= This tool is deprecated and will be removed in a future release of the CUDA toolkit
+========= Please use the compute-sanitizer tool as a drop-in replacement
+========= ERROR SUMMARY: 0 errors
