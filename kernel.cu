@@ -40,9 +40,8 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, co
 
     unsigned int tx_g = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int tx = threadIdx.x;
-    unsigned int ty = threadIdx.y;
     unsigned int bx = blockIdx.x;
-    unsigned int by = blockIdx.y;
+
 
     //clear SHMEM
     if (tx == 0)
@@ -55,15 +54,15 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, co
 
     for (int tile = 0; tile < n / blocksize; tile++)
     {
-        As[tx].x = A.x[(ty + by * blocksize)*n + tile*blocksize+tx];
-        As[tx].y = A.y[(ty + by * blocksize)*n + tile*blocksize+tx];
-        As[tx].z = A.z[(ty + by * blocksize)*n + tile*blocksize+tx];
-        Bs[tx].x = B.x[(ty + by * blocksize)*n + tile*blocksize+tx];
-        Bs[tx].y = B.y[(ty + by * blocksize)*n + tile*blocksize+tx];
-        Bs[tx].z = B.z[(ty + by * blocksize)*n + tile*blocksize+tx];
+        As[tx].x = A.x[tile*blocksize+tx];
+        As[tx].y = A.y[tile*blocksize+tx];
+        As[tx].z = A.z[tile*blocksize+tx];
+        Bs[tx].x = B.x[tile*blocksize+tx];
+        Bs[tx].y = B.y[tile*blocksize+tx];
+        Bs[tx].z = B.z[tile*blocksize+tx];
 
         __syncthreads();
-        for (int j = 0; j < blocksize; j++){
+        for (int j = 1; j < blocksize; j++){
             int idx = j + (blocksize * tile); //global index   
             if (idx < tx_g || idx == tx_g){continue;}
             float da = sqrt((As[tx].x-As[j].x)*(As[tx].x-As[j].x)
