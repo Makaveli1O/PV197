@@ -2,6 +2,8 @@
     "files.associations": {
         "kernel_CPU.C": "cpp",
         "cmath": "cpp",
-        "kernel_cpu2.c": "cpp"
+        "kernel_cpu2.c": "cpp",
+        "chrono": "cpp",
+        "xlocale": "cpp"
     }
 }

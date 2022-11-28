@@ -22,11 +22,23 @@ __device__ void flushShmem(float *shmem, int shmemSize){
     return;
 }
 
+// 12 bytes, should avoid bank conflicts*
 struct sPoint{
     float x;
     float y;
     float z;
 };
+
+__device__ float diff(float Axi, float Axj, float Ayi, float Ayj, float Azi, float Azj
+, float Bxi, float Bxj, float Byi, float Byj, float Bzi, float Bzj){
+        float da = sqrt((Axi-Axj)*(Axi-Axj)
+                    + (Ayi-Ayj)*(Ayi-Ayj)
+                    + (Azi-Azj)*(Azi-Azj));
+        float db = sqrt((Bxi-Bxj)*(Bxi-Bxj)
+                    + (Byi-Byj)*(Byi-Byj)
+                    + (Bzi-Bzj)*(Bzi-Bzj));
+        return (da-db) * (da-db);
+} 
 
 /*
 Solved by 1d array reduction described by NVIDIA docs.
@@ -35,13 +47,12 @@ Might be improved with 2d array reduction?
 const int blocksize = 256;
 __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, const int n , float* output) {
     __shared__ float sdata[blocksize];
-    __shared__ sPoint As[blocksize];
-    __shared__ sPoint Bs[blocksize];
+    __shared__ float3 As[blocksize];
+    __shared__ float3 Bs[blocksize];
 
     unsigned int tx_g = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int tx = threadIdx.x;
     unsigned int bx = blockIdx.x;
-
 
     //clear SHMEM
     if (tx == 0)
@@ -61,18 +72,27 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, co
         Bs[tx].y = B.y[tile*blocksize+tx];
         Bs[tx].z = B.z[tile*blocksize+tx];
 
+        float Ax = A.x[tile*blocksize+tx];
+        float Ay = A.y[tile*blocksize+tx];
+        float Az = A.z[tile*blocksize+tx];
+        float Bx = B.x[tile*blocksize+tx];
+        float By = B.y[tile*blocksize+tx];
+        float Bz = B.z[tile*blocksize+tx];
+        float tmp = 0.0f;
         __syncthreads();
         for (int j = 1; j < blocksize; j++){
             int idx = j + (blocksize * tile); //global index   
             if (idx < tx_g || idx == tx_g){continue;}
-            float da = sqrt((As[tx].x-As[j].x)*(As[tx].x-As[j].x)
-                        + (As[tx].y-As[j].y)*(As[tx].y-As[j].y)
-                        + (As[tx].z-As[j].z)*(As[tx].z-As[j].z));
-            float db = sqrt((Bs[tx].x-Bs[j].x)*(Bs[tx].x-Bs[j].x)
-                        + (Bs[tx].y-Bs[j].y)*(Bs[tx].y-Bs[j].y)
-                        + (Bs[tx].z-Bs[j].z)*(Bs[tx].z-Bs[j].z));            
-            sdata[tx] += (da-db) * (da-db);
+            
+            float da = sqrt((Ax-As[j].x)*(Ax-As[j].x)
+                        + (Ay-As[j].y)*(Ay-As[j].y)
+                        + (Az-As[j].z)*(Az-As[j].z));
+            float db = sqrt((Bx-Bs[j].x)*(Bx-Bs[j].x)
+                        + (By-Bs[j].y)*(By-Bs[j].y)
+                        + (Bz-Bs[j].z)*(Bz-Bs[j].z));  
+            tmp += (da-db) * (da-db);
         }
+        sdata[tx] += tmp;
         __syncthreads();
     }
     
