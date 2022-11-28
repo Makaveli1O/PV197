@@ -1,6 +1,8 @@
 **Similarity of two galaxies calculator**
 
-barracuda ~ 40k Mpairs -- optimization required
+airacuda ~ 85k megapairs/s
+
+Implemented with the usage of blocking of the array and sum reduction. Usage of proper memory, and proper access to shared memory to avoid bank conflicts is required.
 
 **Run configuration**
 
