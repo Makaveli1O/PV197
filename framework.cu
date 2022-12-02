@@ -111,8 +111,8 @@ int main(int argc, char **argv){
 	B.x = (float*)malloc(N*sizeof(B.x[0]));
     B.y = (float*)malloc(N*sizeof(B.y[0]));
     B.z = (float*)malloc(N*sizeof(B.z[0]));
-	generateGalaxies(A, B, N);  
-	//generateSimilarGalaxies(A,B,N);    
+	//generateGalaxies(A, B, N);  
+	generateSimilarGalaxies(A,B,N);    
 	//populateByOne(A,B,N);
 	// allocate and set device memory
 	if (cudaMalloc((void**)&dA.x, N*sizeof(dA.x[0])) != cudaSuccess
@@ -155,9 +155,9 @@ int main(int argc, char **argv){
 	printf("Solving on GPU with default kernel...\n");
 	cudaEventRecord(start, 0);
 	// run it 10x for more accurately timing results
-    for (int i = 0; i < 10; i++){
+    //for (int i = 0; i < 10; i++){
 		diff_GPU = solveGPU(dA, dB, N);
-	}
+	//}
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&time, start, stop);

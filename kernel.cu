@@ -22,13 +22,6 @@ __device__ void flushShmem(float *shmem, int shmemSize){
     return;
 }
 
-// 12 bytes, should avoid bank conflicts*
-struct sPoint{
-    float x;
-    float y;
-    float z;
-};
-
 __device__ float diff(float Axi, float Axj, float Ayi, float Ayj, float Azi, float Azj
 , float Bxi, float Bxj, float Byi, float Byj, float Bzi, float Bzj){
         float da = sqrt((Axi-Axj)*(Axi-Axj)
@@ -40,11 +33,10 @@ __device__ float diff(float Axi, float Axj, float Ayi, float Ayj, float Azi, flo
         return (da-db) * (da-db);
 } 
 
+const int blocksize = 256; //constant block size for higher Ns
 /*
-Solved by 1d array reduction described by NVIDIA docs.
-Might be improved with 2d array reduction?
+    Computation for higher numbers
 */
-const int blocksize = 256;
 __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, const int n , float* output) {
     __shared__ float sdata[blocksize];
     __shared__ float3 As[blocksize];
@@ -52,7 +44,6 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, co
 
     unsigned int tx_g = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int tx = threadIdx.x;
-    unsigned int bx = blockIdx.x;
 
     //clear SHMEM
     if (tx == 0)
@@ -82,7 +73,7 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, co
         __syncthreads();
         for (int j = 1; j < blocksize; j++){
             int idx = j + (blocksize * tile); //global index   
-            if (idx < tx_g || idx == tx_g){continue;}
+            if (idx <= tx_g) continue;
             
             float da = sqrt((Ax-As[j].x)*(Ax-As[j].x)
                         + (Ay-As[j].y)*(Ay-As[j].y)
@@ -109,26 +100,79 @@ __global__ void galaxy_similarity_reduction(const sGalaxy A, const sGalaxy B, co
 
     if (tx == 0) output[blockIdx.x] = sdata[0];
 }
+//algorithm for low N
+__global__ void galaxy_similarity_reduction_lowN(const sGalaxy A, const sGalaxy B, const int n , float* output, const int blocksize) {
+    extern __shared__ float sdata[];
+    unsigned int tx_g = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int tx = threadIdx.x;
 
+    //clear SHMEM
+    if (tx == 0)
+    {
+        flushShmem(sdata, blocksize);
+    }
+
+    //wait for shem flush
+    __syncthreads();
+
+    //load valus to registers
+    float Ax = A.x[tx_g];
+    float Ay = A.y[tx_g];
+    float Az = A.z[tx_g];
+    float Bx = B.x[tx_g];
+    float By = B.y[tx_g];
+    float Bz = B.z[tx_g];
+    
+    //do the math
+    for(int j = tx_g+1; j < n; j++){
+        float da = sqrt((Ax-A.x[j])*(Ax-A.x[j])
+                    + (Ay-A.y[j])*(Ay-A.y[j])
+                    + (Az-A.z[j])*(Az-A.z[j]));
+        float db = sqrt((Bx-B.x[j])*(Bx-B.x[j])
+                    + (By-B.y[j])*(By-B.y[j])
+                    + (Bz-B.z[j])*(Bz-B.z[j]));
+        sdata[tx] += (da-db) * (da-db);
+    }
+
+    for (unsigned int stride = blockDim.x/2; stride > 0; stride>>=1)
+    {
+        if (tx < stride)
+        {
+            sdata[tx] += sdata[tx + stride];
+        }
+        
+        __syncthreads();
+    }
+    
+
+    if (tx == 0) output[blockIdx.x] = sdata[0];
+
+}
 
 float solveGPU(sGalaxy A, sGalaxy B, int n) {
     float *hostOutput; 
     float *deviceOutput; 
+    int _blocksize = blocksize;
+
+    //determine block size
+    if(n < _blocksize) _blocksize = n;
 
     //determine correct number of output elements after reduction
-    int numOutputElements = n / (blocksize / 2);
-    if (n % (blocksize / 2)) {
+    int numOutputElements = n / (_blocksize / 2);
+    if (n % (_blocksize / 2)) {
         numOutputElements++;
     }
 
     hostOutput = (float *)malloc(numOutputElements * sizeof(float));
     // Round up according to array size 
-    int gridSize = (n + blocksize - 1) / blocksize; 
-    //printf("blocksize : %d gridSize: %d\n", blocksize, gridSize);
+    int gridSize = (n + _blocksize - 1) / _blocksize; 
     //allocate GPU memory
     gpuSafeExec(cudaMalloc((void **)&deviceOutput, numOutputElements * sizeof(float)));
-    //std::cerr << "galaxy_similarity_reduction<<<" << gridSize << "," << blocksize << "," << 0 << ">>>\n";
-    galaxy_similarity_reduction<<<gridSize, blocksize>>>(A, B, n, deviceOutput);
+    if(n >= 3072){
+        galaxy_similarity_reduction<<<gridSize, blocksize>>>(A, B, n, deviceOutput);
+    }else{
+        galaxy_similarity_reduction_lowN<<<gridSize, _blocksize, 2 * _blocksize * sizeof(float)>>>(A, B, n, deviceOutput, _blocksize);
+    }
     //move GPU results to CPU via PCIe
     gpuSafeExec(cudaMemcpy(hostOutput, deviceOutput, numOutputElements * sizeof(float), cudaMemcpyDeviceToHost));
 
